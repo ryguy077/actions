@@ -227,14 +227,14 @@ export async function getNftBuyTransaction({
 
 // New function to place a bid on an NFT
 export async function placeNftBid({
-  targetID,
+  mint,
   ownerAddress,
   price,
   buyerAddress,
   latestBlockhash,
   rentPayer,
 }: {
-  targetID: string;
+  mint: string;
   ownerAddress: string;
   price: number;
   buyerAddress: string;
@@ -243,14 +243,10 @@ export async function placeNftBid({
 }) {
   try {
     const queryParams = new URLSearchParams();
-    queryParams.append('quantity', '1');
     queryParams.append('price', price.toString());
     queryParams.append('owner', ownerAddress);
-    queryParams.append('targetId', targetID);
-    queryParams.append('target', 'ASSET_ID');
     queryParams.append('blockhash', latestBlockhash);
-    queryParams.append('rentPayer', rentPayer ?? buyerAddress);
-    queryParams.append('mint', targetID);
+    queryParams.append('mint', mint);
 
     const fullUrl = `${baseUrl}/tx/bid?${queryParams.toString()}`;
     const response = await fetch(fullUrl, {

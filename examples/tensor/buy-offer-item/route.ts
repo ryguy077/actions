@@ -254,8 +254,8 @@ app.openapi(createRoute({
     }
 
     const transaction = await placeNftBid({
-      targetID: itemDetails.onchainId,
-      ownerAddress: itemDetails.owner,
+      mint: itemDetails.onchainId,
+      ownerAddress: account,
       price: priceInLamports,
       buyerAddress: account,
       latestBlockhash: blockhash,
