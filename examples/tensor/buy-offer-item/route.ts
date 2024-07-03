@@ -1,7 +1,7 @@
 import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { ActionError, ActionGetResponse, ActionPostRequest, ActionPostResponse } from '@solana/actions';
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
-import { getNftInfo, placeNftBid } from '../../../api/tensor-api';
+import { getNftInfo, placeNftBid, getNftBuyTransaction } from '../../../api/tensor-api';
 import { createBuyNftTransaction } from './transaction-utils';
 import { formatTokenAmount } from '../../../shared/number-formatting-utils';
 import { connection } from '../../../shared/connection';
@@ -11,7 +11,15 @@ import {
   actionsSpecOpenApiPostResponse,
 } from '../../openapi';
 
+const TENSOR_FEE_BPS = 150; // both for NFT and cNFT
+
 const app = new OpenAPIHono();
+
+function getTotalPrice(price: number, royaltyBps: number): number {
+  const royalty = (price * royaltyBps) / 10000;
+  const marketPlaceFee = (price * TENSOR_FEE_BPS) / 10000;
+  return price + royalty + marketPlaceFee;
+}
 
 app.openapi(createRoute({
   method: 'get',
@@ -58,7 +66,11 @@ app.openapi(createRoute({
   }
 
   const buyNowPriceNetFees = itemDetails.listing?.price;
-  const uiPrice = buyNowPriceNetFees ? formatTokenAmount(parseInt(buyNowPriceNetFees) / LAMPORTS_PER_SOL) : null;
+  const totalPrice = getTotalPrice(
+    parseInt(buyNowPriceNetFees, 10),
+    itemDetails.sellRoyaltyFeeBPS,
+  );
+  const uiPrice = formatTokenAmount(totalPrice / LAMPORTS_PER_SOL);
   const amountParameterName = 'offerAmount';
 
   const actions = [
@@ -274,3 +286,4 @@ app.openapi(createRoute({
 });
 
 export default app;
+
