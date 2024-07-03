@@ -46,9 +46,9 @@ export async function createBuyNftTransaction(
   }
 }
 
-function getTotalPrice(price: number, royaltyBps: number): number {
-  const royalty = (price * royaltyBps) / 10000;
+function getTotalPrice(price: number, royaltyBps: number, tokenStandard: string | null): number {
   const marketPlaceFee = (price * TENSOR_FEE_BPS) / 10000;
+  const royalty = tokenStandard ? (price * royaltyBps) / 10000 : 0;
 
   return price + royalty + marketPlaceFee;
 }
