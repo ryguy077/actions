@@ -1,9 +1,10 @@
 import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { ActionError, ActionGetResponse, ActionPostRequest, ActionPostResponse } from '@solana/actions';
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
-import { getNftInfo } from '../../../api/tensor-api';
-import { createBuyNftTransaction, createBidNftTransaction } from './transaction-utils';
+import { getNftInfo, placeNftBid } from '../../../api/tensor-api';
+import { createBuyNftTransaction } from './transaction-utils';
 import { formatTokenAmount } from '../../../shared/number-formatting-utils';
+import { connection } from '../../../shared/connection';
 import {
   actionSpecOpenApiPostRequestBody,
   actionsSpecOpenApiGetResponse,
@@ -31,7 +32,20 @@ app.openapi(createRoute({
   responses: actionsSpecOpenApiGetResponse,
 }), async (c) => {
   const itemId = c.req.param('itemId');
+  if (!itemId) {
+    return c.json(
+      {
+        message: `Item ID is required`,
+      } satisfies ActionError,
+      {
+        status: 400,
+      },
+    );
+  }
+
   const itemDetails = await getNftInfo(itemId);
+  console.log('Item details:', itemDetails);
+
   if (!itemDetails) {
     return c.json(
       {
@@ -48,19 +62,17 @@ app.openapi(createRoute({
   const amountParameterName = 'offerAmount';
 
   const actions = [
-    uiPrice && { label: `BUY ${uiPrice} SOL`, href: `/api/item/${itemId}/buy` },
-    { href: `/api/item/${itemId}/offer`, label: 'Make an Offer', parameters: [{ name: amountParameterName, label: 'Enter an offer amount in SOL' }] },
-  ].filter((action): action is { label: string; href: string; parameters?: { name: string; label: string; }[] } => action !== null);
+    uiPrice && { label: `BUY ${uiPrice} SOL`, href: `/api/tensor/buy-offer-item/item/${itemId}/buy` },
+    { href: `/api/tensor/buy-offer-item/item/${itemId}/offer/{offerAmount}`, label: 'Make an Offer', parameters: [{ name: amountParameterName, label: 'Enter an offer amount in SOL' }] },
+  ].filter((action): action is { label: string; href: string; parameters?: { name: string; label: string }[] } => action !== null);
 
   const response: ActionGetResponse = {
     icon: itemDetails.imageUri,
     label: uiPrice ? `${uiPrice} SOL` : 'Make an Offer',
     title: itemDetails.name,
-    description: itemDetails.description,
+    description: 'Buy an NFT!' ?? 'No description available',
     links: { actions },
   };
-
-  console.log('GET Response:', JSON.stringify(response, null, 2));
 
   return c.json(response, 200);
 });
@@ -88,10 +100,13 @@ app.openapi(createRoute({
 
   try {
     const requestBody = await c.req.json();
-    console.log('POST Buy Request Body:', JSON.stringify(requestBody, null, 2));
+    console.log('Request body:', requestBody);
+
     const { account } = requestBody as ActionPostRequest;
-    
+
     const itemDetails = await getNftInfo(itemId);
+    console.log('Item details:', itemDetails);
+
     if (!itemDetails) {
       return c.json(
         {
@@ -114,19 +129,17 @@ app.openapi(createRoute({
       );
     }
 
-    const transaction = await createBuyNftTransaction(itemDetails.onchainId, account, itemDetails.listing.price);
+    const transaction = await createBuyNftTransaction(itemDetails.onchainId, account);
 
     if (!transaction) {
       throw new Error('Failed to create transaction');
     }
 
     const response: ActionPostResponse = {
-      transaction: Buffer.from(transaction.serialize()).toString('base64'),
+      transaction: transaction,
     };
 
-    console.log('POST Buy Response:', JSON.stringify(response, null, 2));
-
-    return c.json(response, 200);
+    return c.json(response);
   } catch (e) {
     console.error(`Failed to prepare buy transaction for ${itemId}`, e);
     return c.json(
@@ -142,7 +155,7 @@ app.openapi(createRoute({
 
 app.openapi(createRoute({
   method: 'post',
-  path: '/item/{itemId}/offer',
+  path: '/item/{itemId}/offer/{offerAmount}',
   tags: ['Tensor NFT Actions'],
   request: {
     params: z.object({
@@ -154,36 +167,57 @@ app.openapi(createRoute({
         type: 'string',
         example: '7DVeeik8cDUvHgqrTetG6fcDUHHZ8rW7dFHp1SsohKML',
       }),
+      offerAmount: z.string().openapi({
+        param: {
+          name: 'offerAmount',
+          in: 'path',
+        },
+        type: 'string',
+        example: '0.19',
+      }),
     }),
     body: z.object({
       account: z.string().openapi({
         description: 'The Solana account making the offer',
         example: 'YourSolanaAccountHere',
       }),
-      offerAmount: z.number().openapi({
-        description: 'The amount of the offer in SOL',
-        example: 1.5,
-      }),
     }).openapi({
-      required: ['account', 'offerAmount'],
-      content: {
-        'application/json': {
-          schema: z.object({
-            account: z.string(),
-            offerAmount: z.number(),
-          }),
-        },
-      },
+      required: ['account'],
     }),
   },
   responses: actionsSpecOpenApiPostResponse,
 }), async (c) => {
   const itemId = c.req.param('itemId');
+  const offerAmountParam = c.req.param('offerAmount');
+
+  if (!itemId) {
+    return c.json(
+      {
+        message: `Item ID is required`,
+      } satisfies ActionError,
+      {
+        status: 400,
+      },
+    );
+  }
+
+  if (!offerAmountParam || isNaN(parseFloat(offerAmountParam))) {
+    return c.json(
+      {
+        message: `Offer amount is not a valid number`,
+      } satisfies ActionError,
+      {
+        status: 400,
+      },
+    );
+  }
+
+  const offerAmount = parseFloat(offerAmountParam);
 
   try {
     const requestBody = await c.req.json();
-    console.log('POST Offer Request Body:', JSON.stringify(requestBody, null, 2));
-    const { account, offerAmount } = requestBody as { account: string, offerAmount: number };
+    console.log('POST Offer Request Body:', requestBody);
+    const { account } = requestBody as { account: string };
 
     const itemDetails = await getNftInfo(itemId);
     if (!itemDetails) {
@@ -197,14 +231,30 @@ app.openapi(createRoute({
       );
     }
 
-    const transaction = await createBidNftTransaction(itemDetails.onchainId, account, offerAmount * LAMPORTS_PER_SOL);
+    const blockhash = await connection.getLatestBlockhash({ commitment: 'max' }).then(res => res.blockhash);
+    console.log('Blockhash:', blockhash);
+
+    const priceInLamports = offerAmount * LAMPORTS_PER_SOL;
+    console.log('Price in Lamports:', priceInLamports);
+
+    if (isNaN(priceInLamports)) {
+      throw new Error('Price in Lamports is not a valid number');
+    }
+
+    const transaction = await placeNftBid({
+      targetID: itemDetails.onchainId,
+      ownerAddress: itemDetails.owner,
+      price: priceInLamports,
+      buyerAddress: account,
+      latestBlockhash: blockhash,
+    });
 
     if (!transaction) {
       throw new Error('Failed to create transaction');
     }
 
     const response: ActionPostResponse = {
-      transaction: Buffer.from(transaction.serialize()).toString('base64'),
+      transaction: transaction,
     };
 
     console.log('POST Offer Response:', JSON.stringify(response, null, 2));

@@ -1,62 +1,54 @@
-import { Connection, PublicKey, SystemProgram, TransactionInstruction, VersionedTransaction, TransactionMessage } from '@solana/web3.js';
-import { LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { getNftBuyTransaction } from '../../../api/tensor-api';
+import { connection } from '../../../shared/connection';
+import { getNftInfo } from '../../../api/tensor-api';
 
-const connection = new Connection('https://api.mainnet-beta.solana.com');
+const TENSOR_FEE_BPS = 150; // both for NFT and cNFT
 
-// Function to prepare a transaction
-async function prepareTransaction(
-  instructions: TransactionInstruction[],
-  payer: PublicKey
-): Promise<VersionedTransaction> {
-  const { blockhash } = await connection.getLatestBlockhash();
-  
-  // Create a TransactionMessage and then convert to a VersionedTransaction
-  const message = new TransactionMessage({
-    payerKey: payer,
-    recentBlockhash: blockhash,
-    instructions,
-  }).compileToV0Message();
-
-  const transaction = new VersionedTransaction(message);
-  return transaction;
-}
-
-// Function to create a buy transaction
 export async function createBuyNftTransaction(
   mint: string,
-  buyer: string,
-  price: number
-): Promise<VersionedTransaction> {
-  const payer = new PublicKey(buyer);
-  const recipient = new PublicKey(mint);
+  buyerAddress: string,
+): Promise<string | null> {
+  try {
+    const blockhash = await connection
+      .getLatestBlockhash({ commitment: 'max' })
+      .then((res) => res.blockhash);
 
-  const instructions = [
-    SystemProgram.transfer({
-      fromPubkey: payer,
-      toPubkey: recipient,
-      lamports: price * LAMPORTS_PER_SOL,
-    }),
-  ];
+    console.log('Blockhash:', blockhash);
+  
+    const itemDetails = await getNftInfo(mint);
+    console.log('Item details:', itemDetails);
 
-  return prepareTransaction(instructions, payer);
+    if (!itemDetails || !itemDetails.listing) {
+      console.error('Item details or listing not found');
+      throw new Error('Item details or listing not found');
+    }
+  
+    const totalPrice = getTotalPrice(
+      parseInt(itemDetails.listing.price, 10),
+      itemDetails.sellRoyaltyFeeBPS,
+    );
+    console.log('Total price:', totalPrice);
+  
+    const transaction = await getNftBuyTransaction({
+      mintAddress: mint,
+      ownerAddress: itemDetails.listing.seller,
+      buyerAddress: buyerAddress,
+      price: totalPrice,
+      latestBlockhash: blockhash,
+    });
+
+    console.log('Transaction:', transaction);
+
+    return transaction;
+  } catch (error) {
+    console.error('Error creating buy transaction:', error);
+    throw error;
+  }
 }
 
-// Function to create a bid transaction
-export async function createBidNftTransaction(
-  mint: string,
-  bidder: string,
-  amount: number
-): Promise<VersionedTransaction> {
-  const payer = new PublicKey(bidder);
-  const recipient = new PublicKey(mint);
+function getTotalPrice(price: number, royaltyBps: number): number {
+  const royalty = (price * royaltyBps) / 10000;
+  const marketPlaceFee = (price * TENSOR_FEE_BPS) / 10000;
 
-  const instructions = [
-    SystemProgram.transfer({
-      fromPubkey: payer,
-      toPubkey: recipient,
-      lamports: amount,
-    }),
-  ];
-
-  return prepareTransaction(instructions, payer);
+  return price + royalty + marketPlaceFee;
 }

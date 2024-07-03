@@ -140,13 +140,9 @@ interface ListingsResponse {
   page: Page;
 }
 
-const TENSOR_API_KEY = "2e11bff5-6e28-4883-9073-b84065e0c836";
+const TENSOR_API_KEY = "PASTE_YOUR_KEY_HERE";
 
-// 0b77397c-3600-4458-a579-72bd20bf810e
-// drip_metaverse_melodies
-export async function getNftInfo(
-  mintAddress: string,
-): Promise<TensorNft | null> {
+export async function getNftInfo(mintAddress: string): Promise<TensorNft | null> {
   try {
     const response = await fetch(`${baseUrl}/mint?mint=${mintAddress}`, {
       method: 'GET',
@@ -178,10 +174,7 @@ export async function getListingsByCollection(collId: string) {
   return response;
 }
 
-//
-export async function findCollectionBySlug(
-  slug: string,
-): Promise<Collection | null> {
+export async function findCollectionBySlug(slug: string): Promise<Collection | null> {
   const collectionResponse: CollectionResponse = await fetch(
     `${baseUrl}/collections?sortBy=statsV2.volume1h%3Adesc&limit=1&slugDisplays=${slug}`,
     {
@@ -221,9 +214,63 @@ export async function getNftBuyTransaction({
     });
 
     const buyNftResponse = await response.json();
+    console.log('Buy NFT Response:', buyNftResponse);
 
     return buyNftResponse.txs[0]?.txV0
       ? Buffer.from(buyNftResponse.txs[0]?.txV0.data).toString('base64')
+      : null;
+  } catch (e) {
+    console.warn(e);
+    return null;
+  }
+}
+
+// New function to place a bid on an NFT
+export async function placeNftBid({
+  targetID,
+  ownerAddress,
+  price,
+  buyerAddress,
+  latestBlockhash,
+  rentPayer,
+}: {
+  targetID: string;
+  ownerAddress: string;
+  price: number;
+  buyerAddress: string;
+  latestBlockhash: string;
+  rentPayer?: string;
+}) {
+  try {
+    const queryParams = new URLSearchParams();
+    queryParams.append('quantity', '1');
+    queryParams.append('price', price.toString());
+    queryParams.append('owner', ownerAddress);
+    queryParams.append('targetId', targetID);
+    queryParams.append('target', 'ASSET_ID');
+    queryParams.append('blockhash', latestBlockhash);
+    queryParams.append('rentPayer', rentPayer ?? buyerAddress);
+    queryParams.append('mint', targetID);
+
+    const fullUrl = `${baseUrl}/tx/bid?${queryParams.toString()}`;
+    const response = await fetch(fullUrl, {
+      method: 'GET',
+      headers: {
+        accept: 'application/json',
+        'x-tensor-api-key': TENSOR_API_KEY,
+      },
+    });
+
+    const bidNftResponse = await response.json();
+    console.log('Bid NFT Response:', bidNftResponse);
+
+    if (!bidNftResponse.txs || bidNftResponse.txs.length === 0) {
+      console.error('No transactions found in response:', bidNftResponse);
+      throw new Error('Failed to create transaction');
+    }
+
+    return bidNftResponse.txs[0]?.txV0
+      ? Buffer.from(bidNftResponse.txs[0]?.txV0.data).toString('base64')
       : null;
   } catch (e) {
     console.warn(e);
